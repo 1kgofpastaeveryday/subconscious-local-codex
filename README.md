@@ -1,6 +1,8 @@
 # subconscious-local-codex
 
-A modified version of [claude-subconscious](https://github.com/letta-ai/claude-subconscious) that replaces the Letta cloud backend with a local server. Your session memory stays on your machine.
+A self-contained repo that bundles the [claude-subconscious](https://github.com/letta-ai/claude-subconscious) plugin (v1.5.1) with a local Letta-compatible backend server, replacing the Letta cloud dependency. Your session memory stays on your machine.
+
+> **Note**: This is not a GitHub fork. It vendors upstream plugin code plus a separate local backend. Windows stability patches are included.
 
 ## What's in this repo
 
@@ -110,6 +112,14 @@ Agent memory is stored in `./data/` (gitignored):
 - `conversations/` - conversation history
 
 To back up memory with Git, initialize a repo inside `./data/`.
+
+## Status / Known Limitations
+
+- Tested primarily on Windows. macOS/Linux should work but is not validated.
+- `claude plugin add ./plugin` is the intended install path but has not been dry-run on a completely fresh machine.
+- OpenRouter path is recommended for general use.
+- Codex path is experimental, may break without notice, and may carry account/policy risk.
+- The vendored plugin code (`plugin/`) is based on upstream v1.5.1. Updates to upstream are not automatically tracked.
 
 ## License
 
