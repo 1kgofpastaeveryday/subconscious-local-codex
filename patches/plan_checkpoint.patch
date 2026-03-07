@@ -1,0 +1,14 @@
+--- scripts/plan_checkpoint.ts	2026-03-07 13:24:45.948734900 +0900
++++ scripts/plan_checkpoint.ts	2026-03-07 17:16:10.572216100 +0900
+@@ -237,6 +237,11 @@
+  * Main function
+  */
+ async function main(): Promise<void> {
++  // Skip on Windows — tsx cold start exceeds PreToolUse timeout
++  if (process.platform === 'win32') {
++    process.exit(0);
++  }
++
+   log('='.repeat(60));
+   log('plan_checkpoint.ts started');
+ 

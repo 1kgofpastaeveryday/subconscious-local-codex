@@ -1,0 +1,5 @@
+Set WshShell = CreateObject("WScript.Shell")
+Set WshEnv = WshShell.Environment("Process")
+' Optional: set OpenRouter API key if not using Codex OAuth
+' WshEnv("OPENROUTER_API_KEY") = "sk-or-v1-YOUR_KEY_HERE"
+WshShell.Run "cmd /c cd /d C:\path\to\subconscious-local-codex && npx tsx server.ts >> letta-local.log 2>&1", 0, False

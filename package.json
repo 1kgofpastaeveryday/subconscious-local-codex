@@ -1,0 +1,20 @@
+{
+  "name": "letta-local",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Local Letta-compatible API server for claude-subconscious",
+  "scripts": {
+    "start": "tsx server.ts",
+    "dev": "tsx --watch server.ts"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "multer": "^1.4.5-lts.1",
+    "tsx": "^4.7.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/multer": "^1.4.12",
+    "@types/node": "^20.10.0"
+  }
+}

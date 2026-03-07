@@ -1,0 +1,12 @@
+node_modules/
+*.log
+
+# Runtime data (personal agent memory - do not commit)
+data/agent.json
+data/blocks.json
+data/conversations/
+.letta/
+
+# Secrets
+start-hidden.vbs
+.env
