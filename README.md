@@ -1,13 +1,13 @@
 # subconscious-local-codex
 
-A modified fork of [claude-subconscious](https://github.com/letta-ai/claude-subconscious) that replaces the Letta cloud backend with a local server. Your session memory stays on your machine.
+A modified version of [claude-subconscious](https://github.com/letta-ai/claude-subconscious) that replaces the Letta cloud backend with a local server. Your session memory stays on your machine.
 
 ## What's in this repo
 
 - `plugin/` - The claude-subconscious plugin (upstream v1.5.1 + Windows stability patches)
 - `server.ts` - Local Letta-compatible API server
-- `openai-oauth.ts` - Codex OAuth token management (reads `~/.codex/auth.json`)
-- `oauth-login.ts` - One-time auth helper
+- `openai-oauth.ts` - Experimental Codex token helper (optional)
+- `oauth-login.ts` - Auth helper (optional)
 
 ## How it works
 
@@ -15,7 +15,7 @@ A modified fork of [claude-subconscious](https://github.com/letta-ai/claude-subc
 Claude Code  -->  claude-subconscious plugin (plugin/)
                         |
                         v
-                  Local server (server.ts)  -->  Codex / OpenRouter LLM
+                  Local server (server.ts)  -->  OpenRouter / other LLM
                         |
                         v
                   Local JSON files (data/)
@@ -34,18 +34,22 @@ cd subconscious-local-codex
 npm install
 ```
 
-### 2. Authenticate LLM backend
+### 2. Configure LLM backend
 
-**Option A: Codex OAuth (recommended, free with ChatGPT Pro)**
-
-Install [Codex CLI](https://github.com/openai/codex) and run `codex` once to complete OAuth login.
-This creates `~/.codex/auth.json` which the server reads automatically.
-
-**Option B: OpenRouter**
+Set your OpenRouter API key:
 
 ```bash
 export OPENROUTER_API_KEY="sk-or-v1-..."
 ```
+
+You can use any model available on [OpenRouter](https://openrouter.ai). The default is `qwen/qwen3-235b-a22b-2507`.
+
+> **Experimental: Codex CLI integration**
+>
+> If you have [Codex CLI](https://github.com/openai/codex) installed and authenticated,
+> the server can optionally use its OAuth tokens (`~/.codex/auth.json`) as an alternative backend.
+> This is **experimental, unsupported, and entirely at your own risk**.
+> The server auto-detects Codex auth if present; set `LETTA_USE_CODEX=0` to disable.
 
 ### 3. Install the plugin in Claude Code
 
@@ -85,9 +89,8 @@ The plugin will auto-import the Subconscious agent on first run.
 | `LETTA_LOCAL_PORT` | `8990` | Server port |
 | `LETTA_LOCAL_DATA_DIR` | `./data` | Directory for agent data |
 | `LETTA_LOCAL_MODEL` | `qwen/qwen3-235b-a22b-2507` | OpenRouter model |
-| `LETTA_CODEX_MODEL` | `gpt-5.4` | Codex model |
-| `LETTA_USE_CODEX` | auto-detected | Set to `1` to force Codex |
-| `OPENROUTER_API_KEY` | - | OpenRouter API key (if not using Codex) |
+| `LETTA_USE_CODEX` | auto-detected | Set to `0` to disable Codex auto-detection |
+| `OPENROUTER_API_KEY` | - | OpenRouter API key |
 
 ## Windows Patches (included)
 
