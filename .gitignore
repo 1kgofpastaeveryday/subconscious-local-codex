@@ -1,11 +1,13 @@
 node_modules/
 *.log
 
-# Runtime data (personal agent memory - do not commit)
+# Runtime data
 data/agent.json
-data/blocks.json
 data/conversations/
 .letta/
+
+# blocks.json IS tracked - this is how Mac/Windows sync subconscious memory
+# Do NOT add data/blocks.json back to gitignore
 
 # Secrets
 start-hidden.vbs
