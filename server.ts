@@ -16,7 +16,10 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const DEFAULT_MODEL = process.env.LETTA_LOCAL_MODEL || 'qwen/qwen3-235b-a22b-2507';
 const CODEX_MODEL = process.env.LETTA_CODEX_MODEL || 'gpt-5.4';
 const CODEX_BASE_URL = 'https://chatgpt.com/backend-api/codex/responses';
-const USE_CODEX = process.env.LETTA_USE_CODEX === '1' || hasCodexAuth();
+const PROXY_BASE_URL = process.env.OPENAI_BASE_URL || null; // e.g. http://ca-20036826:10533/v1
+const PROXY_API_KEY = process.env.OPENAI_API_KEY || 'dummy';
+const USE_PROXY = !!PROXY_BASE_URL && process.env.LETTA_USE_CODEX !== '0';
+const USE_CODEX = !USE_PROXY && (process.env.LETTA_USE_CODEX === '1' || hasCodexAuth());
 const GIT_SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 const AGENT_FILE = path.join(DATA_DIR, 'agent.json');
@@ -37,11 +40,26 @@ function ensureDataDirs(): void {
 
 function readJSON(filePath: string): any {
   if (!fs.existsSync(filePath)) return null;
-  return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+  } catch (err) {
+    // Corrupt file — try backup written before last overwrite
+    const bak = filePath + '.bak';
+    if (fs.existsSync(bak)) {
+      console.error(`[readJSON] Parse error on ${path.basename(filePath)}, restoring from .bak`);
+      return JSON.parse(fs.readFileSync(bak, 'utf-8'));
+    }
+    throw err;
+  }
 }
 
 function writeJSON(filePath: string, data: any): void {
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+  const tmp = filePath + '.tmp';
+  const serialized = JSON.stringify(data, null, 2);
+  fs.writeFileSync(tmp, serialized, 'utf-8');
+  // Keep previous version as backup before atomically replacing
+  if (fs.existsSync(filePath)) fs.copyFileSync(filePath, filePath + '.bak');
+  fs.renameSync(tmp, filePath);
 }
 
 function labelFromPath(p: string): string {
@@ -544,6 +562,34 @@ async function parseCodexSSE(response: Response): Promise<{
 }
 
 async function callLLM(messages: Array<{ role: string; content: string | null; tool_calls?: any[]; tool_call_id?: string }>, tools: any[]): Promise<any> {
+  if (USE_PROXY) {
+    const url = `${PROXY_BASE_URL}/chat/completions`;
+    console.log(`  [proxy] Calling ${url} with model=${CODEX_MODEL}`);
+    const body: any = {
+      model: CODEX_MODEL,
+      messages,
+      temperature: 0.7,
+    };
+    if (tools && tools.length > 0) {
+      body.tools = tools;
+      body.tool_choice = 'auto';
+    }
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${PROXY_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Proxy error (${response.status}): ${errorText}`);
+    }
+    return await response.json();
+  }
+
   if (USE_CODEX) {
     const tokens = await getCodexTokens();
     const { instructions, input } = convertToResponsesInput(messages);
@@ -573,6 +619,7 @@ async function callLLM(messages: Array<{ role: string; content: string | null; t
         'Accept': 'text/event-stream',
       },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(120_000), // 2 min timeout
     });
 
     if (!response.ok) {
@@ -616,6 +663,7 @@ async function callLLM(messages: Array<{ role: string; content: string | null; t
       tool_choice: 'auto',
       temperature: 0.7,
     }),
+    signal: AbortSignal.timeout(120_000), // 2 min timeout
   });
 
   if (!response.ok) {
@@ -658,6 +706,15 @@ async function processMessage(
       llmMessages.push({ role: 'user', content: msg.content || '' });
     } else if (msg.message_type === 'assistant_message') {
       llmMessages.push({ role: 'assistant', content: msg.content || '' });
+    }
+  }
+
+  // Safe SSE write — silently skip if the connection is already closed
+  function sseWrite(data: string): void {
+    try {
+      if (!res.writableEnded) res.write(data);
+    } catch {
+      // Client disconnected — nothing to do
     }
   }
 
@@ -705,7 +762,7 @@ async function processMessage(
         });
 
         // SSE event for tool activity
-        res.write(`data: ${JSON.stringify({ message_type: 'tool_call', tool_call: { name: toolName } })}\n\n`);
+        sseWrite(`data: ${JSON.stringify({ message_type: 'tool_call', tool_call: { name: toolName } })}\n\n`);
       }
 
       // Rebuild system prompt (blocks may have changed)
@@ -726,7 +783,7 @@ async function processMessage(
     saveConversation(convId, convMessages);
 
     // SSE event
-    res.write(`data: ${JSON.stringify({
+    sseWrite(`data: ${JSON.stringify({
       message_type: 'assistant_message',
       id: assistantMsg.id,
       content: assistantContent,
@@ -735,7 +792,7 @@ async function processMessage(
     break;
   }
 
-  res.write('data: [DONE]\n\n');
+  sseWrite('data: [DONE]\n\n');
 }
 
 // ============================================
@@ -804,8 +861,31 @@ function startGitSyncTimer(): NodeJS.Timeout | null {
 // Express Server
 // ============================================
 
+// Process-level mutex — prevents concurrent sessions from racing on blocks.json
+let _blocksMutex: Promise<void> = Promise.resolve();
+function withBlocksMutex<T>(fn: () => Promise<T>): Promise<T> {
+  const result = _blocksMutex.then(fn);
+  _blocksMutex = result.then(() => {}, () => {});
+  return result;
+}
+
+const CONFIGURED_API_KEY = process.env.LETTA_API_KEY || '';
+
 const app = express();
 app.use(express.json({ limit: '10mb' }));
+
+// Auth middleware — validates Bearer token on all /v1/ routes except health check
+app.use('/v1', (req, res, next) => {
+  if (req.path === '/models/' || req.path === '/models') { next(); return; }
+  if (!CONFIGURED_API_KEY) { next(); return; }
+  const auth = req.headers['authorization'];
+  if (auth !== `Bearer ${CONFIGURED_API_KEY}`) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  next();
+});
+
 const upload = multer({ storage: multer.memoryStorage() });
 
 // --- POST /v1/agents/import ---
@@ -877,8 +957,8 @@ app.patch('/v1/agents/:id', (req, res) => {
 
 // --- GET /v1/models/ ---
 app.get('/v1/models/', (_req, res) => {
-  const activeModel = USE_CODEX ? CODEX_MODEL : DEFAULT_MODEL;
-  const provider = USE_CODEX ? 'codex' : 'openrouter';
+  const activeModel = (USE_PROXY || USE_CODEX) ? CODEX_MODEL : DEFAULT_MODEL;
+  const provider = USE_PROXY ? 'proxy' : USE_CODEX ? 'codex' : 'openrouter';
   res.json([
     {
       model: activeModel.split('/').pop(),
@@ -929,7 +1009,7 @@ app.post('/v1/conversations/:id/messages', async (req, res) => {
   const agent = loadAgent();
   if (!agent) {
     conversationLocks.delete(convId);
-    res.write(`data: ${JSON.stringify({ error: 'Agent not found' })}\n\n`);
+    try { res.write(`data: ${JSON.stringify({ error: 'Agent not found' })}\n\n`); } catch {}
     res.end();
     return;
   }
@@ -938,13 +1018,13 @@ app.post('/v1/conversations/:id/messages', async (req, res) => {
 
   try {
     console.log(`[msg] Processing message for conversation ${convId} (${userContent.length} chars)`);
-    await processMessage(convId, userContent, agent, res);
+    await withBlocksMutex(() => processMessage(convId, userContent, agent, res));
   } catch (err: any) {
     console.error(`[msg] Error: ${err.message}`);
-    res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+    try { if (!res.writableEnded) res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`); } catch {}
   } finally {
     conversationLocks.delete(convId);
-    res.end();
+    try { if (!res.writableEnded) res.end(); } catch {}
   }
 });
 
@@ -979,10 +1059,19 @@ function shutdown(): void {
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
-app.listen(PORT, () => {
-  const activeModel = USE_CODEX ? CODEX_MODEL : DEFAULT_MODEL;
-  const backend = USE_CODEX ? `Codex (chatgpt.com)` : 'OpenRouter';
-  console.log(`\n  letta-local server running on http://localhost:${PORT}`);
+// Global error handlers — prevent process crash on unhandled errors
+process.on('unhandledRejection', (reason) => {
+  console.error('[FATAL] Unhandled promise rejection:', reason);
+});
+process.on('uncaughtException', (error) => {
+  console.error('[FATAL] Uncaught exception:', error);
+  // Don't exit — keep serving. Only truly fatal errors (OOM etc.) will kill the process.
+});
+
+app.listen(PORT, '127.0.0.1', () => {
+  const activeModel = (USE_PROXY || USE_CODEX) ? CODEX_MODEL : DEFAULT_MODEL;
+  const backend = USE_PROXY ? `Proxy (${PROXY_BASE_URL})` : USE_CODEX ? 'Codex (chatgpt.com)' : 'OpenRouter';
+  console.log(`\n  letta-local server running on http://127.0.0.1:${PORT}`);
   console.log(`  Backend: ${backend}`);
   console.log(`  Model: ${activeModel}`);
   console.log(`  Data:  ${DATA_DIR}`);
