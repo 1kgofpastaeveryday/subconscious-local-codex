@@ -29,12 +29,18 @@ if (args[0] === 'tsx') {
     const silentLauncher = path.join(__dirname, 'silent-launcher.exe');
 
     if (fs.existsSync(silentLauncher) && fs.existsSync(tsxCli)) {
-      // PseudoConsole + CREATE_NO_WINDOW: popup-free execution
-      child = spawn(silentLauncher, ['node', tsxCli, ...scriptArgs], {
-        stdio: 'inherit',
-        windowsHide: true,
-      });
-    } else if (fs.existsSync(tsxCli)) {
+      try {
+        // PseudoConsole + CREATE_NO_WINDOW: popup-free execution
+        child = spawn(silentLauncher, ['node', tsxCli, ...scriptArgs], {
+          stdio: 'inherit',
+          windowsHide: true,
+        });
+      } catch (_) {
+        // silent-launcher.exe blocked by Application Control policy — fall through
+        child = null;
+      }
+    }
+    if (!child && fs.existsSync(tsxCli)) {
       // Fallback: run tsx CLI directly (may flash on Windows Terminal)
       child = spawn(process.execPath, [tsxCli, ...scriptArgs], {
         stdio: 'inherit',
