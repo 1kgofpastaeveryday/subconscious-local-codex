@@ -638,14 +638,20 @@ export function spawnSilentWorker(
     delete workerEnv.SL_STDOUT_FILE;
 
     if (fs.existsSync(silentLauncher) && fs.existsSync(tsxCli)) {
-      child = spawn(silentLauncher, ['node', tsxCli, workerScript, payloadFile], {
-        detached: true,
-        stdio: 'ignore',
-        cwd,
-        env: workerEnv,
-        windowsHide: true,
-      });
-    } else if (fs.existsSync(tsxCli)) {
+      try {
+        child = spawn(silentLauncher, ['node', tsxCli, workerScript, payloadFile], {
+          detached: true,
+          stdio: 'ignore',
+          cwd,
+          env: workerEnv,
+          windowsHide: true,
+        });
+      } catch (_) {
+        // silent-launcher.exe blocked by Application Control — fall through
+        child = null as any;
+      }
+    }
+    if (!child && fs.existsSync(tsxCli)) {
       // Fallback: direct node (may be killed when PseudoConsole closes)
       child = spawn(process.execPath, [tsxCli, workerScript, payloadFile], {
         stdio: 'ignore',
