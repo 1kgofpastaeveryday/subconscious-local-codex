@@ -646,22 +646,29 @@ export function spawnSilentWorker(
           env: workerEnv,
           windowsHide: true,
         });
-      } catch (_) {
-        // silent-launcher.exe blocked by Application Control — fall through
-        child = null as any;
+      } catch (e: any) {
+        if (e?.code === 'UNKNOWN' && e?.errno === -4094) {
+          // WDAC blocks unsigned exe — fall through to direct node
+          child = null as any;
+        } else {
+          throw e;
+        }
       }
     }
     if (!child && fs.existsSync(tsxCli)) {
-      // Fallback: direct node (may be killed when PseudoConsole closes)
+      // Fallback: direct node — detached so it survives parent exit
       child = spawn(process.execPath, [tsxCli, workerScript, payloadFile], {
+        detached: true,
         stdio: 'ignore',
         cwd,
         env: workerEnv,
         windowsHide: true,
       });
-    } else {
-      // Fallback: use npx through shell (may flash console window)
+    }
+    if (!child) {
+      // Last resort: npx through shell (may flash console window)
       child = spawn(NPX_CMD, ['tsx', workerScript, payloadFile], {
+        detached: true,
         stdio: 'ignore',
         cwd,
         env: workerEnv,

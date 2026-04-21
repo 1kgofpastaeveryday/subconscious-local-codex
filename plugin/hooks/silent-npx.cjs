@@ -35,9 +35,13 @@ if (args[0] === 'tsx') {
           stdio: 'inherit',
           windowsHide: true,
         });
-      } catch (_) {
-        // silent-launcher.exe blocked by Application Control policy — fall through
-        child = null;
+      } catch (e) {
+        if (e && e.code === 'UNKNOWN' && e.errno === -4094) {
+          // WDAC blocks unsigned exe — fall through to direct node
+          child = null;
+        } else {
+          throw e;
+        }
       }
     }
     if (!child && fs.existsSync(tsxCli)) {
@@ -46,7 +50,8 @@ if (args[0] === 'tsx') {
         stdio: 'inherit',
         windowsHide: true,
       });
-    } else {
+    }
+    if (!child) {
       // Last resort: npx through shell
       child = spawn('npx', args, {
         stdio: 'inherit',
